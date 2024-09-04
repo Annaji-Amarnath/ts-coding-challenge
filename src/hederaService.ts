@@ -23,6 +23,7 @@ import {
   Transaction,
   AccountBalance,
   TransactionReceipt,
+  AccountCreateTransaction,
 } from "@hashgraph/sdk";
 
 export interface Account {
@@ -32,14 +33,19 @@ export interface Account {
 
 export const accounts: Account[] = [
   {
-    id: "0.0.4800114",
+    id: "0.0.4736208",
     privateKey:
-      "302e020100300506032b657004220420fd5878ed50a6192c2fe36cb3b386be1d09d01b1efc2c974ebde98f8378c80ecc",
+      "302e020100300506032b6570042204208b75da3e8d63bc1d89c86c04a55eca860b7dcd5845382ac2dcdf0fd56971c769",
   },
   {
     id: "0.0.4811041",
     privateKey:
       "302e020100300506032b657004220420f9a1edd37431b1b5065dd9f5b0dbfc7fd4c4f20bacbde4eaefe9bc2996330781",
+  },
+  {
+    id: "0.0.4800114",
+    privateKey:
+      "302e020100300506032b657004220420fd5878ed50a6192c2fe36cb3b386be1d09d01b1efc2c974ebde98f8378c80ecc",
   },
   {
     id: "0.0.4809676",
@@ -221,7 +227,7 @@ export class HederaService {
       const receipt = await txResponse.getReceipt(this.client);
       return receipt.status;
     }
-    return transaction.freezeWith(this.client);
+    return transaction;
   }
   async submitTransaction(
     transaction: Transaction
@@ -233,5 +239,20 @@ export class HederaService {
     const receipt = await transferRx.getReceipt(this.client);
 
     return receipt;
+  }
+
+  async createAnAccount(
+    initialBalance: number
+  ): Promise<{ accountId: AccountId | null; privateKey: PrivateKey }> {
+    const privateKey = PrivateKey.generate();
+
+    const transaction = await new AccountCreateTransaction()
+      .setInitialBalance(initialBalance)
+      .setKey(privateKey)
+      .execute(this.client);
+    const receipt = await transaction.getReceipt(this.client);
+    const accountId = receipt.accountId;
+
+    return { accountId, privateKey };
   }
 }
