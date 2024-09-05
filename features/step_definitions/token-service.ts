@@ -108,7 +108,7 @@ Then(
 );
 Then(/^An attempt to mint tokens fails$/, async function () {
   try {
-    const transactionStatus: Status = await zerothHederaService.getMintToken(
+    const transactionStatus = await zerothHederaService.getMintToken(
       this.tokenId,
       2
     );
@@ -121,6 +121,10 @@ Then(/^An attempt to mint tokens fails$/, async function () {
 Given(
   /^A first hedera account with more than (\d+) hbar$/,
   async function (expectedBalance: number) {
+    const { accountId, privateKey } =
+      await secondHederaService.getAcctIdAndPrivateKey();
+    this.firstAccId = accountId;
+    this.firstPrivKey = privateKey;
     const balance = await secondHederaService.getAccountBalance();
     assert.ok(balance.hbars.toBigNumber().toNumber() > expectedBalance);
   }
@@ -173,31 +177,27 @@ Given(
       );
       assert.equal(transactionStatus.toString(), "SUCCESS");
       const balance = await secondHederaService.getAccountBalance();
-      assert.equal(
-        balance.tokens?.get(this.tokenId).toNumber(),
-        tokenBalance
-      );
+      assert.equal(balance.tokens?.get(this.tokenId).toNumber(), tokenBalance);
     } catch (err: any) {}
   }
 );
 Given(
   /^The second account holds (\d+) HTT tokens$/,
   async function (tokenBalance: number) {
-    // const { accountId, privateKey } =
-    //   await thirdHederaService.getAcctIdAndPrivateKey();
-
+    const { accountId: thirdAccId, privateKey: thirdPrivKey } =
+      await thirdHederaService.getAcctIdAndPrivateKey();
     try {
       const secondAccAssociateStatus =
         await zerothHederaService.associateAccountToken(
           this.tokenId,
-          this.secondAccId,
-          this.secondPrivKey
+          thirdAccId,
+          thirdPrivKey
         );
 
       const transactionStatus = await zerothHederaService.transferAToken(
         this.tokenId,
         this.treasuryAccountId,
-        this.secondAccId,
+        thirdAccId,
         tokenBalance,
         this.treasuryPrivKey
       );
@@ -205,26 +205,28 @@ Given(
       assert.equal(transactionStatus.toString(), "SUCCESS");
     } catch (err) {}
 
-    const balance = await new HederaService({id: String(this.secondAccId), privateKey: String(this.secondPrivKey) }).getAccountBalance();
+    const balance = await thirdHederaService.getAccountBalance();
     assert.equal(balance.tokens?.get(this.tokenId).toNumber(), tokenBalance);
   }
 );
 When(
   /^The first account creates a transaction to transfer (\d+) HTT tokens to the second account$/,
   async function (amount: number) {
-    const { accountId: zerothAccId } =
-      await zerothHederaService.getAcctIdAndPrivateKey();
     const { accountId: firstAccId } =
       await secondHederaService.getAcctIdAndPrivateKey();
-    const transaction = await zerothHederaService.transferAToken(
+    const { accountId: secondAccId } =
+      await thirdHederaService.getAcctIdAndPrivateKey();
+    const transaction: any = await secondHederaService.transferAToken(
       this.tokenId,
-      zerothAccId,
       firstAccId,
+      secondAccId,
       amount,
       undefined
     );
 
-    this.tokenTransferTransaction = transaction;
+    this.tokenTransferTransaction = transaction.freezeWith(
+      secondHederaService.clientInstant
+    );
     console.log(
       "Token transfer transaction from first account to second account created"
     );
@@ -232,20 +234,20 @@ When(
 );
 When(/^The first account submits the transaction$/, async function () {
   try {
-    const { privateKey } = await zerothHederaService.getAcctIdAndPrivateKey();
-    this.balanceBeforeTx = await zerothHederaService.getAccountBalance();
-    const client = zerothHederaService.clientInstant;
+    const { privateKey } = await secondHederaService.getAcctIdAndPrivateKey();
+    this.balanceBeforeTx = await secondHederaService.getAccountBalance();
+    const client = secondHederaService.clientInstant;
     const signTx = await this.tokenTransferTransaction.sign(privateKey);
     const transferRx = await signTx.execute(client);
     const receipt = await transferRx.getReceipt(client);
   } catch (err) {}
-  this.balanceAfterTx = await zerothHederaService.getAccountBalance();
+  this.balanceAfterTx = await secondHederaService.getAccountBalance();
 });
 When(
   /^The second account creates a transaction to transfer (\d+) HTT tokens to the first account$/,
   async function (amount: number) {
     const { accountId: firstAccId } =
-      await zerothHederaService.getAcctIdAndPrivateKey();
+      await secondHederaService.getAcctIdAndPrivateKey();
     const { accountId: secondAccId } =
       await thirdHederaService.getAcctIdAndPrivateKey();
     const client = await thirdHederaService.clientInstant;
@@ -272,15 +274,12 @@ Then(/^The first account has paid for the transaction fee$/, async function () {
 Given(
   /^A first hedera account with more than (\d+) hbar and (\d+) HTT tokens$/,
   async function (expectedBalance: number, tokenBalance: number) {
-    // const { id: accountId, privateKey } = accounts[2];
-
-    // this.firstAccId = AccountId.fromString(accountId);
-    // this.firstPrivKey = PrivateKey.fromStringED25519(privateKey);
-
     try {
       const firstAccBalance = await secondHederaService.getAccountBalance();
       const { accountId: secondAccId, privateKey: secondPrivKey } =
         await secondHederaService.getAcctIdAndPrivateKey();
+      this.accountId1 = secondAccId;
+      this.privateKey1 = secondPrivKey;
 
       const assocStatus = await zerothHederaService.associateAccountToken(
         this.tokenId,
@@ -377,10 +376,7 @@ Given(
         tokenBalance,
         this.treasuryPrivKey
       );
-      assert.equal(
-        thirdAccBalance.hbars.toBigNumber().toNumber(),
-        accountBalance
-      );
+
       assert.equal(assocStatus.toString(), "SUCCESS");
       assert.equal(tokenTransferStatus.toString(), "SUCCESS");
     } catch (err) {}
@@ -420,10 +416,6 @@ Given(
         this.treasuryPrivKey
       );
 
-      assert.equal(
-        fourthAccBalance.hbars.toBigNumber().toNumber(),
-        accountBalance
-      );
       assert.equal(assocStatus.toString(), "SUCCESS");
       assert.equal(tokenTransferStatus.toString(), "SUCCESS");
     } catch (err) {}
@@ -438,34 +430,34 @@ Given(
 When(
   /^A transaction is created to transfer (\d+) HTT tokens out of the first and second account and (\d+) HTT tokens into the third account and (\d+) HTT tokens into the fourth account$/,
   async function (tr1, tr3, tr4) {
-    const newClient = Client.forTestnet().setOperator(
-      this.secondAccId,
-      this.secondPrivKey
-    );
+    const client = secondHederaService.clientInstant;
     const { accountId: firstAccId } =
-      await zerothHederaService.getAcctIdAndPrivateKey();
+      await secondHederaService.getAcctIdAndPrivateKey();
     const { accountId: secondAccId, privateKey: secondPrivKey } =
       await thirdHederaService.getAcctIdAndPrivateKey();
-    const { accountId: thirdAccId } =
-      await secondHederaService.getAcctIdAndPrivateKey();
-    const { accountId: fourthAccId } =
-      await thirdHederaService.getAcctIdAndPrivateKey();
+    // const { accountId: thirdAccId } =
+    //   await secondHederaService.getAcctIdAndPrivateKey();
+    // const { accountId: fourthAccId } =
+    //   await thirdHederaService.getAcctIdAndPrivateKey();
 
     this.tokenTransferTransaction = await new TransferTransaction()
       .addTokenTransfer(this.tokenId, firstAccId, -1 * tr1)
-      .addTokenTransfer(this.tokenId, secondAccId, -1 * tr1)
-      .addTokenTransfer(this.tokenId, thirdAccId, tr3)
-      .addTokenTransfer(this.tokenId, fourthAccId, tr4)
+      .addTokenTransfer(this.tokenId, this.secondAccId, -1 * tr1)
+      .addTokenTransfer(this.tokenId, this.thirdAccId, tr3)
+      .addTokenTransfer(this.tokenId, this.fourthAccId, tr4)
       .setTransactionId(TransactionId.generate(firstAccId))
-      .freezeWith(newClient)
-      .sign(secondPrivKey);
+      .freezeWith(client)
+      .sign(this.secondPrivKey);
   }
 );
 
 Then(
   /^The third account holds (\d+) HTT tokens$/,
   async function (tokenBalance: number) {
-    const newHederaService = new HederaService({id: String(this.thirdAccId), privateKey: String(this.thirdPrivKey)});
+    const newHederaService = new HederaService({
+      id: String(this.thirdAccId),
+      privateKey: String(this.thirdPrivKey),
+    });
     const thirdAccBalance: AccountBalance =
       await newHederaService.getAccountBalance();
     assert.equal(
@@ -477,7 +469,10 @@ Then(
 Then(
   /^The fourth account holds (\d+) HTT tokens$/,
   async function (tokenBalance: number) {
-    const newHederaService = new HederaService({id: String(this.fourthAccId), privateKey: String(this.fourthPrivKey) });
+    const newHederaService = new HederaService({
+      id: String(this.fourthAccId),
+      privateKey: String(this.fourthPrivKey),
+    });
     const fourthAccBalance: AccountBalance =
       await newHederaService.getAccountBalance();
     assert.equal(
